@@ -1,10 +1,7 @@
 package com.lagradost.cloudstream3.utils
 
 import android.net.Uri
-import com.lagradost.cloudstream3.SubtitleFile
-import com.lagradost.cloudstream3.TvType
-import com.lagradost.cloudstream3.USER_AGENT
-import com.lagradost.cloudstream3.app
+import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.extractors.*
 import kotlinx.coroutines.delay
@@ -55,7 +52,7 @@ data class ExtractorLinkPlayList(
 )
 
 
-open class ExtractorLink(
+open class ExtractorLink constructor(
     open val source: String,
     open val name: String,
     override val url: String,
@@ -65,7 +62,24 @@ open class ExtractorLink(
     override val headers: Map<String, String> = mapOf(),
     /** Used for getExtractorVerifierJob() */
     open val extractorData: String? = null,
+    open val isDash: Boolean = false,
 ) : VideoDownloadManager.IDownloadableMinimum {
+    /**
+     * Old constructor without isDash, allows for backwards compatibility with extensions.
+     * Should be removed after all extensions have updated their cloudstream.jar
+     **/
+    constructor(
+        source: String,
+        name: String,
+        url: String,
+        referer: String,
+        quality: Int,
+        isM3u8: Boolean = false,
+        headers: Map<String, String> = mapOf(),
+        /** Used for getExtractorVerifierJob() */
+        extractorData: String? = null
+    ) : this(source, name, url, referer, quality, isM3u8, headers, extractorData, false)
+
     override fun toString(): String {
         return "ExtractorLink(name=$name, url=$url, referer=$referer, isM3u8=$isM3u8)"
     }
@@ -208,6 +222,8 @@ val extractorApis: MutableList<ExtractorApi> = arrayListOf(
     VideovardSX(),
     Mp4Upload(),
     StreamTape(),
+    StreamTapeNet(),
+    ShaveTape(),
 
     //mixdrop extractors
     MixDropBz(),
@@ -220,6 +236,7 @@ val extractorApis: MutableList<ExtractorApi> = arrayListOf(
     XStreamCdn(),
 
     StreamSB(),
+    Vidgomunimesb(),
     StreamSB1(),
     StreamSB2(),
     StreamSB3(),
@@ -230,32 +247,44 @@ val extractorApis: MutableList<ExtractorApi> = arrayListOf(
     StreamSB8(),
     StreamSB9(),
     StreamSB10(),
+    StreamSB11(),
     SBfull(),
     // Streamhub(), cause Streamhub2() works
     Streamhub2(),
     Ssbstream(),
     Sbthe(),
+    Vidgomunime(),
+    Sbflix(),
+    Streamsss(),
+    Sbspeed(),
 
     Fastream(),
-    
+
     FEmbed(),
     FeHD(),
     Fplayer(),
     DBfilm(),
     Luxubu(),
     LayarKaca(),
+    Rasacintaku(),
+    FEnet(),
+    Kotakajair(),
+    Cdnplayer(),
     //  WatchSB(), 'cause StreamSB.kt works
     Uqload(),
     Uqload1(),
+    Uqload2(),
     Evoload(),
     Evoload1(),
-    VoeExtractor(),
-    // UpstreamExtractor(), GenericM3U8.kt works
+    UpstreamExtractor(),
 
     Tomatomatela(),
+    TomatomatelalClub(),
     Cinestart(),
     OkRu(),
     OkRuHttps(),
+    Okrulink(),
+    Sendvid(),
 
     // dood extractors
     DoodCxExtractor(),
@@ -266,6 +295,8 @@ val extractorApis: MutableList<ExtractorApi> = arrayListOf(
     DoodWsExtractor(),
     DoodShExtractor(),
     DoodWatchExtractor(),
+    DoodWfExtractor(),
+    DoodYtExtractor(),
 
     AsianLoad(),
 
@@ -280,6 +311,8 @@ val extractorApis: MutableList<ExtractorApi> = arrayListOf(
     Userload(),
     Supervideo(),
     GuardareStream(),
+    CineGrabber(),
+    Vanfem(),
 
     // StreamSB.kt works
     //  SBPlay(),
@@ -309,11 +342,56 @@ val extractorApis: MutableList<ExtractorApi> = arrayListOf(
     DesuOdvip(),
     DesuDrive(),
 
+    Chillx(),
+    Watchx(),
+    Bestx(),
+    Keephealth(),
+    Sbnet(),
+    Sbasian(),
+    Sblongvu(),
+    Fembed9hd(),
+    StreamM4u(),
+    Krakenfiles(),
+    Gofile(),
+    Vicloud(),
+    Uservideo(),
+
+    Movhide(),
+    StreamhideCom(),
+    FileMoonIn(),
+    Moviesm4u(),
     Filesim(),
+    FileMoon(),
+    FileMoonSx(),
+    Vido(),
     Linkbox(),
     Acefile(),
     SpeedoStream(),
+    SpeedoStream1(),
     Zorofile(),
+    Embedgram(),
+    Mvidoo(),
+    Streamplay(),
+    Vidmoly(),
+    Vidmolyme(),
+    Voe(),
+    Tubeless(),
+    Moviehab(),
+    MoviehabNet(),
+    Jeniusplay(),
+
+    Gdriveplayerapi(),
+    Gdriveplayerapp(),
+    Gdriveplayerfun(),
+    Gdriveplayerio(),
+    Gdriveplayerme(),
+    Gdriveplayerbiz(),
+    Gdriveplayerorg(),
+    Gdriveplayerus(),
+    Gdriveplayerco(),
+    Gdriveplayer(),
+    DatabaseGdrive(),
+    DatabaseGdrive2(),
 
     YoutubeExtractor(),
     YoutubeShortLinkExtractor(),
@@ -322,6 +400,13 @@ val extractorApis: MutableList<ExtractorApi> = arrayListOf(
     Streamlare(),
     VidSrcExtractor(),
     VidSrcExtractor2(),
+    PlayLtXyz(),
+    AStreamHub(),
+
+    Cda(),
+    Dailymotion(),
+    ByteShare(),
+    Ztreamhub()
 )
 
 
@@ -374,6 +459,28 @@ suspend fun getPostForm(requestUrl: String, html: String): String? {
         ),
         data = mapOf("op" to op, "id" to id, "mode" to mode, "hash" to hash)
     ).text
+}
+
+fun ExtractorApi.fixUrl(url: String): String {
+    if (url.startsWith("http") ||
+        // Do not fix JSON objects when passed as urls.
+        url.startsWith("{\"")
+    ) {
+        return url
+    }
+    if (url.isEmpty()) {
+        return ""
+    }
+
+    val startsWithNoHttp = url.startsWith("//")
+    if (startsWithNoHttp) {
+        return "https:$url"
+    } else {
+        if (url.startsWith('/')) {
+            return mainUrl + url
+        }
+        return "$mainUrl/$url"
+    }
 }
 
 abstract class ExtractorApi {

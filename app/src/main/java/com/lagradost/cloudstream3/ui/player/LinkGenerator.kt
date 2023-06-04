@@ -1,12 +1,22 @@
 package com.lagradost.cloudstream3.ui.player
 
-import com.lagradost.cloudstream3.apmap
+import com.lagradost.cloudstream3.amap
+import com.lagradost.cloudstream3.mvvm.normalSafeApiCall
 import com.lagradost.cloudstream3.utils.*
+import java.net.URI
 
+/**
+ * Used to open the player more easily with the LinkGenerator
+ **/
+data class BasicLink(
+    val url: String,
+    val name: String? = null,
+)
 class LinkGenerator(
-    private val links: List<String>,
+    private val links: List<BasicLink>,
     private val extract: Boolean = true,
     private val referer: String? = null,
+    private val isM3u8: Boolean? = null
 ) : IGenerator {
     override val hasCache = false
 
@@ -43,8 +53,8 @@ class LinkGenerator(
         subtitleCallback: (SubtitleData) -> Unit,
         offset: Int
     ): Boolean {
-        links.apmap { link ->
-            if (!extract || !loadExtractor(link, referer, {
+        links.amap { link ->
+            if (!extract || !loadExtractor(link.url, referer, {
                     subtitleCallback(PlayerSubtitleHelper.getSubtitleData(it))
                 }) {
                     callback(it to null)
@@ -54,10 +64,12 @@ class LinkGenerator(
                 callback(
                     ExtractorLink(
                         "",
-                        link,
-                        unshortenLinkSafe(link), // unshorten because it might be a raw link
+                        link.name ?: link.url,
+                        unshortenLinkSafe(link.url), // unshorten because it might be a raw link
                         referer ?: "",
-                        Qualities.Unknown.value, link.contains(".m3u") // TODO USE REAL PARSER
+                        Qualities.Unknown.value, isM3u8 ?: normalSafeApiCall {
+                            URI(link.url).path?.substringAfterLast(".")?.contains("m3u")
+                        } ?: false
                     ) to null
                 )
             }

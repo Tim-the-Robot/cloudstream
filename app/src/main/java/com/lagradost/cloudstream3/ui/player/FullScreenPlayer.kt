@@ -40,6 +40,7 @@ import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.ui.player.GeneratorPlayer.Companion.subsProvidersIsActive
 import com.lagradost.cloudstream3.utils.Qualities
+import com.lagradost.cloudstream3.utils.AppUtils.isUsingMobileData
 import com.lagradost.cloudstream3.utils.SingleSelectionHelper.showDialog
 import com.lagradost.cloudstream3.utils.UIHelper.colorFromAttribute
 import com.lagradost.cloudstream3.utils.UIHelper.dismissSafe
@@ -83,6 +84,7 @@ const val HORIZONTAL_MULTIPLIER = 2.0f
 const val DOUBLE_TAB_MAXIMUM_HOLD_TIME = 200L
 const val DOUBLE_TAB_MINIMUM_TIME_BETWEEN = 200L    // this also affects the UI show response time
 const val DOUBLE_TAB_PAUSE_PERCENTAGE = 0.15        // in both directions
+private const val SUBTITLE_DELAY_BUNDLE_KEY = "subtitle_delay"
 
 // All the UI Logic for the player
 open class FullScreenPlayer : AbstractPlayerFragment() {
@@ -109,6 +111,8 @@ open class FullScreenPlayer : AbstractPlayerFragment() {
     protected var currentPrefQuality =
         Qualities.P2160.value // preferred maximum quality, used for ppl w bad internet or on cell
     protected var fastForwardTime = 10000L
+    protected var androidTVInterfaceOffSeekTime = 10000L;
+    protected var androidTVInterfaceOnSeekTime = 30000L;
     protected var swipeHorizontalEnabled = false
     protected var swipeVerticalEnabled = false
     protected var playBackSpeedEnabled = false
@@ -173,6 +177,10 @@ open class FullScreenPlayer : AbstractPlayerFragment() {
     )
 
     open fun showMirrorsDialogue() {
+        throw NotImplementedError()
+    }
+
+    open fun showTracksDialogue() {
         throw NotImplementedError()
     }
 
@@ -583,7 +591,7 @@ open class FullScreenPlayer : AbstractPlayerFragment() {
         updateLockUI()
     }
 
-    private fun updateUIVisibility() {
+    fun updateUIVisibility() {
         val isGone = isLocked || !isShowing
         var togglePlayerTitleGone = isGone
         context?.let {
@@ -601,12 +609,14 @@ open class FullScreenPlayer : AbstractPlayerFragment() {
         player_top_holder?.isGone = isGone
         //player_episodes_button?.isVisible = !isGone && hasEpisodes
         player_video_title?.isGone = togglePlayerTitleGone
-        player_video_title_rez?.isGone = isGone
+//        player_video_title_rez?.isGone = isGone
         player_episode_filler?.isGone = isGone
         player_center_menu?.isGone = isGone
         player_lock?.isGone = !isShowing
         //player_media_route_button?.isClickable = !isGone
         player_go_back_holder?.isGone = isGone
+        player_sources_btt?.isGone = isGone
+        player_skip_episode?.isClickable = !isGone
     }
 
     private fun updateLockUI() {
@@ -1045,19 +1055,19 @@ open class FullScreenPlayer : AbstractPlayerFragment() {
                             }
                             KeyEvent.KEYCODE_DPAD_LEFT -> {
                                 if (!isShowing && !isLocked) {
-                                    player.seekTime(-10000L)
+                                    player.seekTime(-androidTVInterfaceOffSeekTime)
                                     return true
                                 } else if (player_pause_play?.isFocused == true) {
-                                    player.seekTime(-30000L)
+                                    player.seekTime(-androidTVInterfaceOnSeekTime)
                                     return true
                                 }
                             }
                             KeyEvent.KEYCODE_DPAD_RIGHT -> {
                                 if (!isShowing && !isLocked) {
-                                    player.seekTime(10000L)
+                                    player.seekTime(androidTVInterfaceOffSeekTime)
                                     return true
                                 } else if (player_pause_play?.isFocused == true) {
-                                    player.seekTime(30000L)
+                                    player.seekTime(androidTVInterfaceOnSeekTime)
                                     return true
                                 }
                             }
@@ -1096,11 +1106,11 @@ open class FullScreenPlayer : AbstractPlayerFragment() {
     }
 
     protected fun uiReset() {
-        isLocked = false
         isShowing = false
 
         // if nothing has loaded these buttons should not be visible
         player_skip_episode?.isVisible = false
+        player_tracks_btt?.isVisible = false
         player_skip_op?.isVisible = false
         shadow_overlay?.isVisible = false
 
@@ -1111,11 +1121,20 @@ open class FullScreenPlayer : AbstractPlayerFragment() {
         resetRewindText()
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        // As this is video specific it is better to not do any setKey/getKey
+        outState.putLong(SUBTITLE_DELAY_BUNDLE_KEY, subtitleDelay)
+        super.onSaveInstanceState(outState)
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         // init variables
         setPlayBackSpeed(getKey(PLAYBACK_SPEED_KEY) ?: 1.0f)
+        savedInstanceState?.getLong(SUBTITLE_DELAY_BUNDLE_KEY)?.let {
+            subtitleDelay = it
+        }
 
         // handle tv controls
         playerEventListener = { eventType ->
@@ -1134,6 +1153,9 @@ open class FullScreenPlayer : AbstractPlayerFragment() {
                 }
                 PlayerEventType.Play -> {
                     player.handleEvent(CSPlayerEvent.Play)
+                }
+                PlayerEventType.SkipCurrentChapter -> {
+                    player.handleEvent(CSPlayerEvent.SkipCurrentChapter)
                 }
                 PlayerEventType.Resize -> {
                     nextResize()
@@ -1198,6 +1220,13 @@ open class FullScreenPlayer : AbstractPlayerFragment() {
                     settingsManager.getInt(ctx.getString(R.string.double_tap_seek_time_key), 10)
                         .toLong() * 1000L
 
+                androidTVInterfaceOffSeekTime =
+                    settingsManager.getInt(ctx.getString(R.string.android_tv_interface_off_seek_key), 10)
+                        .toLong() * 1000L
+                androidTVInterfaceOnSeekTime =
+                    settingsManager.getInt(ctx.getString(R.string.android_tv_interface_on_seek_key), 10)
+                        .toLong() * 1000L
+
                 navigationBarHeight = ctx.getNavigationBarHeight()
                 statusBarHeight = ctx.getStatusBarHeight()
 
@@ -1228,9 +1257,8 @@ open class FullScreenPlayer : AbstractPlayerFragment() {
                         ctx.getString(R.string.double_tap_pause_enabled_key),
                         false
                     )
-
                 currentPrefQuality = settingsManager.getInt(
-                    ctx.getString(R.string.quality_pref_key),
+                    ctx.getString(if (ctx.isUsingMobileData()) R.string.quality_pref_mobile_data_key else R.string.quality_pref_key),
                     currentPrefQuality
                 )
                 // useSystemBrightness =
@@ -1246,6 +1274,10 @@ open class FullScreenPlayer : AbstractPlayerFragment() {
         player_pause_play?.setOnClickListener {
             autoHide()
             player.handleEvent(CSPlayerEvent.PlayPauseToggle)
+        }
+
+        skip_chapter_button?.setOnClickListener {
+            player.handleEvent(CSPlayerEvent.SkipCurrentChapter)
         }
 
         // init clicks
@@ -1296,10 +1328,8 @@ open class FullScreenPlayer : AbstractPlayerFragment() {
             showMirrorsDialogue()
         }
 
-        player_intro_play?.setOnClickListener {
-            player_intro_play?.isGone = true
-            player.handleEvent(CSPlayerEvent.Play)
-            updateUIVisibility()
+        player_tracks_btt?.setOnClickListener {
+            showTracksDialogue()
         }
 
         // it is !not! a bug that you cant touch the right side, it does not register inputs on navbar or status bar

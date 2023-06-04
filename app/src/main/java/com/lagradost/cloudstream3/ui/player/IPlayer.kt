@@ -2,6 +2,7 @@ package com.lagradost.cloudstream3.ui.player
 
 import android.content.Context
 import com.lagradost.cloudstream3.ui.subtitles.SaveCaptionStyle
+import com.lagradost.cloudstream3.utils.EpisodeSkip
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorUri
 
@@ -12,9 +13,9 @@ enum class PlayerEventType(val value: Int) {
     SeekForward(2),
     SeekBack(3),
 
-    //SkipCurrentChapter(4),
+    SkipCurrentChapter(4),
     NextEpisode(5),
-    PrevEpisode(5),
+    PrevEpisode(6),
     PlayPauseToggle(7),
     ToggleMute(8),
     Lock(9),
@@ -32,7 +33,7 @@ enum class CSPlayerEvent(val value: Int) {
     SeekForward(2),
     SeekBack(3),
 
-    //SkipCurrentChapter(4),
+    SkipCurrentChapter(4),
     NextEpisode(5),
     PrevEpisode(6),
     PlayPauseToggle(7),
@@ -46,7 +47,43 @@ enum class CSPlayerLoading {
     //IsDone,
 }
 
-class InvalidFileException(msg : String) : Exception(msg)
+
+interface Track {
+    /**
+     * Unique among the class, used to check which track is used.
+     * VideoTrack and AudioTrack can have the same id
+     **/
+    val id: String?
+    val label: String?
+
+    //    val isCurrentlyPlaying: Boolean
+    val language: String?
+}
+
+data class VideoTrack(
+    override val id: String?,
+    override val label: String?,
+//    override val isCurrentlyPlaying: Boolean,
+    override val language: String?,
+    val width: Int?,
+    val height: Int?,
+) : Track
+
+data class AudioTrack(
+    override val id: String?,
+    override val label: String?,
+//    override val isCurrentlyPlaying: Boolean,
+    override val language: String?,
+) : Track
+
+data class CurrentTracks(
+    val currentVideoTrack: VideoTrack?,
+    val currentAudioTrack: AudioTrack?,
+    val allVideoTracks: List<VideoTrack>,
+    val allAudioTracks: List<AudioTrack>,
+)
+
+class InvalidFileException(msg: String) : Exception(msg)
 
 //http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4
 const val STATE_RESUME_WINDOW = "resumeWindow"
@@ -73,8 +110,8 @@ interface IPlayer {
     fun seekTime(time: Long)
     fun seekTo(time: Long)
 
-    fun getSubtitleOffset() : Long // in ms
-    fun setSubtitleOffset(offset : Long) // in ms
+    fun getSubtitleOffset(): Long // in ms
+    fun setSubtitleOffset(offset: Long) // in ms
 
     fun initCallbacks(
         playerUpdated: (Any?) -> Unit,                              // attach player to view
@@ -88,11 +125,17 @@ interface IPlayer {
         prevEpisode: (() -> Unit)? = null,                          // this is used by the player to load the previous episode
         subtitlesUpdates: (() -> Unit)? = null,                     // callback from player to inform that subtitles have updated in some way
         embeddedSubtitlesFetched: ((List<SubtitleData>) -> Unit)? = null, // callback from player to give all embedded subtitles
+        onTracksInfoChanged: (() -> Unit)? = null,                  // Callback when tracks are changed, used for UI changes
+        onTimestampInvoked: ((EpisodeSkip.SkipStamp?) -> Unit)? = null, // Callback when timestamps appear, null when it should disappear
+        onTimestampSkipped: ((EpisodeSkip.SkipStamp) -> Unit)? = null, // callback for when a chapter is skipped, aka when event is handled (or for future use when skip automatically ads/sponsor)
     )
+
     fun releaseCallbacks()
 
     fun updateSubtitleStyle(style: SaveCaptionStyle)
     fun saveData()
+
+    fun addTimeStamps(timeStamps: List<EpisodeSkip.SkipStamp>)
 
     fun loadPlayer(
         context: Context,
@@ -100,16 +143,16 @@ interface IPlayer {
         link: ExtractorLink? = null,
         data: ExtractorUri? = null,
         startPosition: Long? = null,
-        subtitles : Set<SubtitleData>,
-        subtitle : SubtitleData?,
-        autoPlay : Boolean? = true
+        subtitles: Set<SubtitleData>,
+        subtitle: SubtitleData?,
+        autoPlay: Boolean? = true
     )
 
     fun reloadPlayer(context: Context)
 
-    fun setActiveSubtitles(subtitles : Set<SubtitleData>)
-    fun setPreferredSubtitles(subtitle : SubtitleData?) : Boolean // returns true if the player requires a reload, null for nothing
-    fun getCurrentPreferredSubtitle() : SubtitleData?
+    fun setActiveSubtitles(subtitles: Set<SubtitleData>)
+    fun setPreferredSubtitles(subtitle: SubtitleData?): Boolean // returns true if the player requires a reload, null for nothing
+    fun getCurrentPreferredSubtitle(): SubtitleData?
 
     fun handleEvent(event: CSPlayerEvent)
 
@@ -120,5 +163,13 @@ interface IPlayer {
     fun release()
 
     /** Get if player is actually used */
-    fun isActive() : Boolean
+    fun isActive(): Boolean
+
+    fun getVideoTracks(): CurrentTracks
+
+    /** If no parameters are set it'll default to no set size, Specifying the id allows for track overrides to force the player to pick the quality. */
+    fun setMaxVideoSize(width: Int = Int.MAX_VALUE, height: Int = Int.MAX_VALUE, id: String? = null)
+
+    /** If no trackLanguage is set it'll default to first track. Specifying the id allows for track overrides as the language can be identical. */
+    fun setPreferredAudioTrack(trackLanguage: String?, id: String? = null)
 }

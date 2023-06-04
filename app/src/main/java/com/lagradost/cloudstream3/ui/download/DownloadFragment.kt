@@ -24,7 +24,6 @@ import com.lagradost.cloudstream3.mvvm.observe
 import com.lagradost.cloudstream3.ui.download.DownloadButtonSetup.handleDownloadClick
 import com.lagradost.cloudstream3.ui.player.GeneratorPlayer
 import com.lagradost.cloudstream3.ui.player.LinkGenerator
-import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.isTvSettings
 import com.lagradost.cloudstream3.utils.AppUtils.loadResult
 import com.lagradost.cloudstream3.utils.Coroutines.main
 import com.lagradost.cloudstream3.utils.DOWNLOAD_EPISODE_CACHE
@@ -38,6 +37,11 @@ import com.lagradost.cloudstream3.utils.VideoDownloadManager
 import kotlinx.android.synthetic.main.fragment_downloads.*
 import kotlinx.android.synthetic.main.stream_input.*
 import android.text.format.Formatter.formatShortFileSize
+import androidx.core.widget.doOnTextChanged
+import com.lagradost.cloudstream3.mvvm.normalSafeApiCall
+import com.lagradost.cloudstream3.ui.player.BasicLink
+import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.isTrueTvSettings
+import java.net.URI
 
 
 const val DOWNLOAD_NAVIGATE_TO = "downloadpage"
@@ -175,7 +179,9 @@ class DownloadFragment : Fragment() {
 
         download_list?.adapter = adapter
         download_list?.layoutManager = GridLayoutManager(context, 1)
-        download_stream_button?.isGone = isTvSettings()
+
+        // Should be visible in emulator layout
+        download_stream_button?.isGone = isTrueTvSettings()
         download_stream_button?.setOnClickListener {
             val dialog =
                 Dialog(it.context ?: return@setOnClickListener, R.style.AlertDialogCustom)
@@ -183,10 +189,29 @@ class DownloadFragment : Fragment() {
 
             dialog.show()
 
+            // If user has clicked the switch do not interfere
+            var preventAutoSwitching = false
+            dialog.hls_switch?.setOnClickListener {
+                preventAutoSwitching = true
+            }
+
+            fun activateSwitchOnHls(text: String?) {
+                dialog.hls_switch?.isChecked = normalSafeApiCall {
+                    URI(text).path?.substringAfterLast(".")?.contains("m3u")
+                } == true
+            }
+
+            dialog.stream_referer?.doOnTextChanged { text, _, _, _ ->
+                if (!preventAutoSwitching)
+                    activateSwitchOnHls(text?.toString())
+            }
+
             (activity?.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager?)?.primaryClip?.getItemAt(
                 0
             )?.text?.toString()?.let { copy ->
-                dialog.stream_url?.setText(copy)
+                val fixedText = copy.trim()
+                dialog.stream_url?.setText(fixedText)
+                activateSwitchOnHls(fixedText)
             }
 
             dialog.apply_btt?.setOnClickListener {
@@ -200,9 +225,10 @@ class DownloadFragment : Fragment() {
                         R.id.global_to_navigation_player,
                         GeneratorPlayer.newInstance(
                             LinkGenerator(
-                                listOf(url),
+                                listOf(BasicLink(url)),
                                 extract = true,
-                                referer = referer
+                                referer = referer,
+                                isM3u8 = dialog.hls_switch?.isChecked
                             )
                         )
                     )
